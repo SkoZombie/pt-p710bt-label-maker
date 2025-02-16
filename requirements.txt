@@ -3,3 +3,5 @@ git+https://github.com/pybluez/pybluez.git#egg=pybluez
 pypng==0.0.20
 packbits==0.6
 appdirs==1.4.4
+qrcode>=7.4.2
+pillow~=11.1.0
