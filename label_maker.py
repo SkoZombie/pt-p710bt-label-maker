@@ -3,6 +3,7 @@ import sys
 from enum import IntEnum, IntFlag
 
 import bluetooth
+from bluetooth import BluetoothError
 
 import app_args
 from config import set_default_bt, get_default_bt
@@ -147,9 +148,20 @@ def bt_socket_manager(*args, **kwargs):
     socket.close()
 
 
+def try_bt_connect(socket, bt_address, bt_channel) -> bool:
+    try:
+        socket.connect((bt_address, bt_channel))
+    except BluetoothError as e:
+        print(f"Unable to connect to printer {bt_address}: {e}")
+        print("Please check the printer is on and properly paired in your system.")
+        return False
+
+    return True
+
+
 def get_printer_info(bt_address, bt_channel):
     with bt_socket_manager(bluetooth.RFCOMM) as socket:
-        socket.connect((bt_address, bt_channel))
+        try_bt_connect(socket, bt_address, bt_channel) or exit(1)
 
         send_invalidate(socket)
         send_initialize(socket)
@@ -159,9 +171,9 @@ def get_printer_info(bt_address, bt_channel):
         handle_status_information(status_information)
 
 
-def make_label(options):
+def make_label(bt_address, bt_channel, image):
     with bt_socket_manager(bluetooth.RFCOMM) as socket:
-        socket.connect((options.bt_address, options.bt_channel))
+        try_bt_connect(socket, bt_address, bt_channel) or exit(1)
 
         send_invalidate(socket)
         send_initialize(socket)
@@ -171,7 +183,11 @@ def make_label(options):
         handle_status_information(status_information)
 
         width = TZE_DOTS.get(detected_media_width)
-        data = encode_png(options.image, width)
+
+        if isinstance(image, list) and len(image):
+            image = image[0]
+
+        data = encode_png(image, width)
 
         send_switch_dynamic_command_mode(socket)
         send_switch_automatic_status_notification_mode(socket)
@@ -180,6 +196,8 @@ def make_label(options):
         send_advanced_mode_settings(socket)
         send_specify_margin_amount(socket)
         send_select_compression_mode(socket)
+        send_raster_data(socket, data)
+        send_print_command(socket)
         send_raster_data(socket, data)
         send_print_command_with_feeding(socket)
 
@@ -235,7 +253,8 @@ def send_various_mode_settings(socket: bluetooth.BluetoothSocket):
 
 def send_advanced_mode_settings(socket: bluetooth.BluetoothSocket):
     """Set print chaining off [1B 69 4B {08}]"""
-    socket.send(b"\x1B\x69\x4B\x08")
+    # socket.send(b"\x1B\x69\x4B\x08")
+    socket.send(b"\x1B\x69\x4B\x01")
 
 
 def send_specify_margin_amount(socket: bluetooth.BluetoothSocket):
@@ -254,9 +273,17 @@ def send_raster_data(socket: bluetooth.BluetoothSocket, data):
         socket.send(bytes(line))
 
 
+def send_print_command(socket: bluetooth.BluetoothSocket):
+    socket.send(b"\x0C")
+
 def send_print_command_with_feeding(socket: bluetooth.BluetoothSocket):
     """print and feed [1A]"""
     socket.send(b"\x1A")
+
+
+def send_partial_cut(socket: bluetooth.BluetoothSocket):
+    """Partial cut of label [1B 69 41 01]"""
+    socket.send(b"\x1B\x69\x41\01")
 
 
 def send_status_information_request(socket: bluetooth.BluetoothSocket):
@@ -293,7 +320,7 @@ def handle_status_information(status_information):
 
         mode = Mode(status_information[STATUS_OFFSET_MODE])
 
-        print("Mode: %s" % ", ".join([f.name for f in Mode if f in mode]))
+        print("Mode: %s" % ", ".join(str(f.name) for f in Mode if f in mode))
 
         sys.exit(0)
 
@@ -304,8 +331,8 @@ def handle_status_information(status_information):
         error_information_1 = ErrorInformation1(status_information[STATUS_OFFSET_ERROR_INFORMATION_1])
         error_information_2 = ErrorInformation2(status_information[STATUS_OFFSET_ERROR_INFORMATION_2])
 
-        print("Error information 1: %s" % ", ".join([f.name for f in ErrorInformation1 if f in error_information_1]))
-        print("Error information 2: %s" % ", ".join([f.name for f in ErrorInformation2 if f in error_information_2]))
+        print("Error information 1: %s" % ", ".join(str(f.name) for f in ErrorInformation1 if f in error_information_1))
+        print("Error information 2: %s" % ", ".join(str(f.name) for f in ErrorInformation2 if f in error_information_2))
 
         sys.exit("An error has occurred; exiting program")
 
@@ -356,9 +383,6 @@ def bad_options(message):
 def main():
     options = app_args.parse()
 
-    if not options.info and not options.image:
-        bad_options('Image path required')
-
     if options.set_default:
         if not options.bt_address:
             bad_options('You must provide a BT address to set as default')
@@ -366,18 +390,22 @@ def main():
             set_default_bt(options.bt_address)
             print(f"{options.bt_address} set as default BT address")
 
+    if not options.info and not options.image and not options.set_default:
+        bad_options('Image path required')
+
     if not options.bt_address:
         default_bt = get_default_bt()
         if not default_bt:
             bad_options("BT Address is required. If you'd like to remember it use --set-default")
         options.bt_address = default_bt
-        print(f"Using BT Address of {options.bt_address}")
+        print(f"Connecting to printer with BT Address of {options.bt_address}")
 
     if options.info:
         get_printer_info(options.bt_address, options.bt_channel)
         exit(0)
 
-    make_label(options)
+    if options.image:
+        make_label(options.bt_address, options.bt_channel, options.image)
 
 
 if __name__ == "__main__":

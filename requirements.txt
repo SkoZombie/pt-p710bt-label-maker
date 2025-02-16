@@ -1,4 +1,5 @@
 # PyBluez==0.23
+# You need libbluetooth-dev install to install from git
 git+https://github.com/pybluez/pybluez.git#egg=pybluez
 pypng==0.0.20
 packbits==0.6
