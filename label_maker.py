@@ -36,6 +36,13 @@ TZE_DOTS = {
 # Global for the media width so we can make sure we rasterize/ print to the right size
 detected_media_width = -1
 
+class AdvanceMode(IntFlag):
+    """ Advanced mode settings ESC i K"""
+    DEFAULTS = 0
+    NO_CHAIN_PRINT = 1 << 3
+    SPECIAL_TAPE = 1 << 4       # Labels are not cut when special tape is installed
+    HIGH_RESOLUTION = 1 << 6
+    NO_BUFFER_CLEARING = 1 << 7
 
 class ErrorInformation1(IntFlag):
     NO_MEDIA = 0x01
@@ -171,7 +178,7 @@ def get_printer_info(bt_address, bt_channel):
         handle_status_information(status_information)
 
 
-def make_label(bt_address, bt_channel, image):
+def make_label(bt_address, bt_channel, images):
     with bt_socket_manager(bluetooth.RFCOMM) as socket:
         try_bt_connect(socket, bt_address, bt_channel) or exit(1)
 
@@ -184,11 +191,14 @@ def make_label(bt_address, bt_channel, image):
 
         width = TZE_DOTS.get(detected_media_width)
 
-        if isinstance(image, list) and len(image):
-            image = image[0]
+        data_list = []
+        if isinstance(images, list) and len(images):
+            for i in images:
+                data_list.append(encode_png(i, width))
+        elif isinstance(images, str):
+            data_list.append(encode_png(images, width))
 
-        data = encode_png(image, width)
-
+        data = data_list.pop(0)
         send_switch_dynamic_command_mode(socket)
         send_switch_automatic_status_notification_mode(socket)
         send_print_information_command(socket, len(data), detected_media_width)
@@ -197,9 +207,14 @@ def make_label(bt_address, bt_channel, image):
         send_specify_margin_amount(socket)
         send_select_compression_mode(socket)
         send_raster_data(socket, data)
-        send_print_command(socket)
-        send_raster_data(socket, data)
+
+        while data_list:
+            send_print_command(socket)
+            data = data_list.pop(0)
+            send_raster_data(socket, data)
+
         send_print_command_with_feeding(socket)
+        send_partial_cut(socket)
 
         while True:
             status_information = receive_status_information_response(socket)
@@ -254,7 +269,7 @@ def send_various_mode_settings(socket: bluetooth.BluetoothSocket):
 def send_advanced_mode_settings(socket: bluetooth.BluetoothSocket):
     """Set print chaining off [1B 69 4B {08}]"""
     # socket.send(b"\x1B\x69\x4B\x08")
-    socket.send(b"\x1B\x69\x4B\x01")
+    socket.send(b"\x1B\x69\x4B\x00") # chain printing
 
 
 def send_specify_margin_amount(socket: bluetooth.BluetoothSocket):
