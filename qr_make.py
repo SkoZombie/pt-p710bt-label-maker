@@ -1,5 +1,7 @@
 import base64
 import random
+import re
+import csv
 
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
@@ -69,19 +71,41 @@ def create_qr_label_right(data, label_text, footer_text, height=70, padding = 10
 
     return img
 
-# Example usage
-rand_64bit = random.getrandbits(64)
+def int_to_b64(i) -> str:
+    return base64.urlsafe_b64encode(i.to_bytes((i.bit_length() + 7) // 8 or 1, byteorder='big')).decode().rstrip('=')
 
-# Base64 URL-safe encode and strip padding
-base64_encoded = base64.urlsafe_b64encode(rand_64bit.to_bytes(8, 'big')).decode().rstrip('=')
+def gen_label(title) -> int:
+    """return the new """
+    # Example usage
+    disc_id = random.getrandbits(64)
 
-data = base64_encoded
-label_text = "Rise of the Planet of the Apes"
+    # Base64 URL-safe encode and strip padding
+    base64_encoded = int_to_b64(disc_id)
 
-if len(label_text) > 20:
-    s = label_text.index(" ", len(label_text) // 2)
-    label_text = label_text[:s] + "\n" + label_text[s+1:]
+    data = base64_encoded
 
-qr_label_img = create_qr_label_right(data, label_text, footer_text= base64_encoded)
-qr_label_img.show()
-qr_label_img.save("qr_label_right.png")
+    if len(title) > 20:
+        s = title.index(" ", len(title) // 2)
+        title = title[:s] + "\n" + title[s + 1:]
+
+    safe_title = re.sub(r"\W", "", title)
+
+    qr_label_img = create_qr_label_right(data, title, footer_text=base64_encoded)
+    # qr_label_img.show()
+    qr_label_img.save(f"{safe_title}.png")
+
+    return disc_id
+
+
+if __name__ == "__main__":
+    with open("/home/awhalan/documents/discs/melody_discs.txt") as fd:
+        lines = [l.rstrip() for l in fd.readlines()]
+
+    entries = list(zip(lines[::2], lines[1::2]))
+
+    with open("library.csv", "w") as fd:
+        csv_file = csv.writer(fd)
+        csv_file.writerow(["disc_id", "title", "upc"])
+        for upc, title in entries:
+            disc_id = gen_label(title)
+            csv_file.writerow([disc_id, title, upc])
